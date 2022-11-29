@@ -74,7 +74,8 @@ def get_meanface(meanface_file, num_nb):
         reverse_index2 += meanface_indices_reversed[i][1]
     return meanface_indices, reverse_index1, reverse_index2, max_len
 
-def compute_loss_pip(outputs_map, outputs_local_x, outputs_local_y, outputs_nb_x, outputs_nb_y, labels_map, labels_local_x, labels_local_y, labels_nb_x, labels_nb_y,  criterion_cls, criterion_reg, num_nb):
+def compute_loss_pip(outputs_map, outputs_local_x, outputs_local_y, outputs_nb_x, outputs_nb_y, outputs_prop,
+                     labels_map, labels_local_x, labels_local_y, labels_nb_x, labels_nb_y,  labels_prop, criterion_cls, criterion_reg, criterion_bce, num_nb):
 
     tmp_batch, tmp_channel, tmp_height, tmp_width = outputs_map.size()
     labels_map = labels_map.view(tmp_batch*tmp_channel, -1)
@@ -106,9 +107,18 @@ def compute_loss_pip(outputs_map, outputs_local_x, outputs_local_y, outputs_nb_x
     loss_y = criterion_reg(outputs_local_y_select, labels_local_y_select)
     loss_nb_x = criterion_reg(outputs_nb_x_select, labels_nb_x_select)
     loss_nb_y = criterion_reg(outputs_nb_y_select, labels_nb_y_select)
-    return loss_map, loss_x, loss_y, loss_nb_x, loss_nb_y
 
-def train_model(det_head, net, train_loader, criterion_cls, criterion_reg, cls_loss_weight, reg_loss_weight, num_nb, optimizer, num_epochs, scheduler, save_dir, save_interval, device):
+    loss_prop_pose = criterion_cls(outputs_prop[:,:3], labels_prop[:,:3])
+    loss_prop_leye = criterion_bce(outputs_prop[:,3], labels_prop[:,3])
+    loss_prop_reye = criterion_bce(outputs_prop[:,4], labels_prop[:,4])
+    loss_prop_mouth = criterion_bce(outputs_prop[:,5], labels_prop[:,5])
+    loss_prop_mouth_big = criterion_bce(outputs_prop[:,6], labels_prop[:,6])
+
+    loss_prop = loss_prop_pose + loss_prop_leye + loss_prop_reye + loss_prop_mouth + loss_prop_mouth_big
+
+    return loss_map, loss_x, loss_y, loss_nb_x, loss_nb_y, loss_prop
+
+def train_model(det_head, net, train_loader, criterion_cls, criterion_reg, criterion_bce, cls_loss_weight, reg_loss_weight, num_nb, optimizer, num_epochs, scheduler, save_dir, save_interval, device):
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
         logging.info('Epoch {}/{}'.format(epoch, num_epochs - 1))
@@ -119,16 +129,21 @@ def train_model(det_head, net, train_loader, criterion_cls, criterion_reg, cls_l
 
         for i, data in enumerate(train_loader):
             if det_head == 'pip':
-                inputs, labels_map, labels_x, labels_y, labels_nb_x, labels_nb_y = data
+                inputs, labels_map, labels_x, labels_y, labels_nb_x, labels_nb_y, labels_prop = data
                 inputs = inputs.to(device)
                 labels_map = labels_map.to(device)
                 labels_x = labels_x.to(device)
                 labels_y = labels_y.to(device)
                 labels_nb_x = labels_nb_x.to(device)
                 labels_nb_y = labels_nb_y.to(device)
-                outputs_map, outputs_x, outputs_y, outputs_nb_x, outputs_nb_y = net(inputs)
-                loss_map, loss_x, loss_y, loss_nb_x, loss_nb_y = compute_loss_pip(outputs_map, outputs_x, outputs_y, outputs_nb_x, outputs_nb_y, labels_map, labels_x, labels_y, labels_nb_x, labels_nb_y, criterion_cls, criterion_reg, num_nb)
-                loss = cls_loss_weight*loss_map + reg_loss_weight*loss_x + reg_loss_weight*loss_y + reg_loss_weight*loss_nb_x + reg_loss_weight*loss_nb_y
+                labels_prop = labels_prop.to(device)
+
+                outputs_map, outputs_x, outputs_y, outputs_nb_x, outputs_nb_y, outputs_prop = net(inputs)
+                loss_map, loss_x, loss_y, loss_nb_x, loss_nb_y, loss_prop = compute_loss_pip(outputs_map, outputs_x, outputs_y, outputs_nb_x, outputs_nb_y, outputs_prop,
+                                                                                             labels_map, labels_x, labels_y, labels_nb_x, labels_nb_y, labels_prop, criterion_cls, criterion_reg, criterion_bce, num_nb)
+
+
+                loss = cls_loss_weight*loss_map + reg_loss_weight*loss_x + reg_loss_weight*loss_y + reg_loss_weight*loss_nb_x + reg_loss_weight*loss_nb_y + loss_prop
             else:
                 print('No such head:', det_head)
                 exit(0)
@@ -138,10 +153,10 @@ def train_model(det_head, net, train_loader, criterion_cls, criterion_reg, cls_l
             optimizer.step()
             if i%10 == 0:
                 if det_head == 'pip':
-                    print('[Epoch {:d}/{:d}, Batch {:d}/{:d}] <Total loss: {:.6f}> <map loss: {:.6f}> <x loss: {:.6f}> <y loss: {:.6f}> <nbx loss: {:.6f}> <nby loss: {:.6f}>'.format(
-                        epoch, num_epochs-1, i, len(train_loader)-1, loss.item(), cls_loss_weight*loss_map.item(), reg_loss_weight*loss_x.item(), reg_loss_weight*loss_y.item(), reg_loss_weight*loss_nb_x.item(), reg_loss_weight*loss_nb_y.item()))
-                    logging.info('[Epoch {:d}/{:d}, Batch {:d}/{:d}] <Total loss: {:.6f}> <map loss: {:.6f}> <x loss: {:.6f}> <y loss: {:.6f}> <nbx loss: {:.6f}> <nby loss: {:.6f}>'.format(
-                        epoch, num_epochs-1, i, len(train_loader)-1, loss.item(), cls_loss_weight*loss_map.item(), reg_loss_weight*loss_x.item(), reg_loss_weight*loss_y.item(), reg_loss_weight*loss_nb_x.item(), reg_loss_weight*loss_nb_y.item()))
+                    print('[Epoch {:d}/{:d}, Batch {:d}/{:d}] <Total loss: {:.6f}> <map loss: {:.6f}> <x loss: {:.6f}> <y loss: {:.6f}> <nbx loss: {:.6f}> <nby loss: {:.6f}> <loss_prop: {:.6f}>'.format(
+                        epoch, num_epochs-1, i, len(train_loader)-1, loss.item(), cls_loss_weight*loss_map.item(), reg_loss_weight*loss_x.item(), reg_loss_weight*loss_y.item(), reg_loss_weight*loss_nb_x.item(), reg_loss_weight*loss_nb_y.item(), loss_prop.item()))
+                    logging.info('[Epoch {:d}/{:d}, Batch {:d}/{:d}] <Total loss: {:.6f}> <map loss: {:.6f}> <x loss: {:.6f}> <y loss: {:.6f}> <nbx loss: {:.6f}> <nby loss: {:.6f}> <loss_prop: {:.6f}>'.format(
+                        epoch, num_epochs-1, i, len(train_loader)-1, loss.item(), cls_loss_weight*loss_map.item(), reg_loss_weight*loss_x.item(), reg_loss_weight*loss_y.item(), reg_loss_weight*loss_nb_x.item(), reg_loss_weight*loss_nb_y.item(), loss_prop.item()))
                 else:
                     print('No such head:', det_head)
                     exit(0)
@@ -157,7 +172,7 @@ def train_model(det_head, net, train_loader, criterion_cls, criterion_reg, cls_l
 def forward_pip(net, inputs, preprocess, input_size, net_stride, num_nb):
     net.eval()
     with torch.no_grad():
-        outputs_cls, outputs_x, outputs_y, outputs_nb_x, outputs_nb_y = net(inputs)
+        outputs_cls, outputs_x, outputs_y, outputs_nb_x, outputs_nb_y, outputs_prop = net(inputs)
         tmp_batch, tmp_channel, tmp_height, tmp_width = outputs_cls.size()
         assert tmp_batch == 1
 
@@ -193,7 +208,7 @@ def forward_pip(net, inputs, preprocess, input_size, net_stride, num_nb):
         tmp_nb_x /= 1.0 * input_size / net_stride
         tmp_nb_y /= 1.0 * input_size / net_stride
 
-    return tmp_x, tmp_y, tmp_nb_x, tmp_nb_y, outputs_cls, max_cls
+    return tmp_x, tmp_y, tmp_nb_x, tmp_nb_y, outputs_cls, max_cls, outputs_prop
 
 def compute_nme(lms_pred, lms_gt, norm):
     lms_pred = lms_pred.reshape((-1, 2))

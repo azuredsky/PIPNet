@@ -22,6 +22,9 @@ import torchvision.models as models
 from networks import *
 import data_utils
 from functions import *
+from mobilenetv3 import mobilenetv3_large
+
+import timm
 
 if not len(sys.argv) == 3:
     print('Format:')
@@ -51,6 +54,17 @@ elif cfg.backbone == 'resnet50':
 elif cfg.backbone == 'resnet101':
     resnet101 = models.resnet101(pretrained=cfg.pretrained)
     net = Pip_resnet101(resnet101, cfg.num_nb, num_lms=cfg.num_lms, input_size=cfg.input_size, net_stride=cfg.net_stride)
+elif cfg.backbone == 'mobilenet_v2':
+    mbnet = models.mobilenet_v2(pretrained=cfg.pretrained)
+    net = Pip_mbnetv2(mbnet, cfg.num_nb, num_lms=cfg.num_lms, input_size=cfg.input_size, net_stride=cfg.net_stride)
+elif cfg.backbone == 'mobilenet_v3':
+    mbnet = mobilenetv3_large()
+    if cfg.pretrained:
+        mbnet.load_state_dict(torch.load('lib/mobilenetv3-large-1cd25616.pth'))
+        net = Pip_mbnetv3(mbnet, cfg.num_nb, num_lms=cfg.num_lms, input_size=cfg.input_size, net_stride=cfg.net_stride)
+elif cfg.backbone == 'semnasnet_075':
+    semnasnet = timm.create_model(model_name="semnasnet_075", pretrained=True, features_only=True)
+    net = Pip_semnasnet(semnasnet, cfg.num_nb, num_lms=cfg.num_lms, input_size=cfg.input_size, net_stride=cfg.net_stride)
 else:
     print('No such backbone!')
     exit(0)
@@ -75,6 +89,34 @@ def demo_video(video_file, net, preprocess, input_size, net_stride, num_nb, use_
     det_box_scale = 1.2
 
     net.eval()
+    
+    
+    if 0:
+        import onnx
+        import onnxsim
+
+        batchSize = 1
+
+        dummy_input = torch.autograd.Variable(
+            torch.randn(batchSize, 3, 256, 256)
+        )
+        output_path = weight_file.replace('pth', 'onnx')
+        dynamic_axes = {'data': {0: 'batch_size'},
+                        'output': {0: 'batch_size'}}
+        torch.onnx.export(
+            net,
+            dummy_input,
+            output_path,
+            verbose=True,
+            keep_initializers_as_inputs=True,
+            opset_version=11,
+            input_names=["data"],
+            output_names=["output"],
+            dynamic_axes = dynamic_axes
+        )
+        print("finished exporting onnx ")
+    
+    
     if video_file == 'camera':
         cap = cv2.VideoCapture(0)
     else:
@@ -83,6 +125,9 @@ def demo_video(video_file, net, preprocess, input_size, net_stride, num_nb, use_
         print("Error opening video stream or file")
     frame_width = int(cap.get(3))
     frame_height = int(cap.get(4))
+    
+    out = cv2.VideoWriter('out_pipnet.mp4', cv2.VideoWriter_fourcc('M', 'P', '4', 'V'), 25, (frame_width, frame_height))
+    
     count = 0
     while(cap.isOpened()):
         ret, frame = cap.read()
@@ -113,7 +158,7 @@ def demo_video(video_file, net, preprocess, input_size, net_stride, num_nb, use_
                 inputs = Image.fromarray(det_crop[:,:,::-1].astype('uint8'), 'RGB')
                 inputs = preprocess(inputs).unsqueeze(0)
                 inputs = inputs.to(device)
-                lms_pred_x, lms_pred_y, lms_pred_nb_x, lms_pred_nb_y, outputs_cls, max_cls = forward_pip(net, inputs, preprocess, input_size, net_stride, num_nb)
+                lms_pred_x, lms_pred_y, lms_pred_nb_x, lms_pred_nb_y, outputs_cls, max_cls, outputs_prop = forward_pip(net, inputs, preprocess, input_size, net_stride, num_nb)
                 lms_pred = torch.cat((lms_pred_x, lms_pred_y), dim=1).flatten()
                 tmp_nb_x = lms_pred_nb_x[reverse_index1, reverse_index2].view(cfg.num_lms, max_len)
                 tmp_nb_y = lms_pred_nb_y[reverse_index1, reverse_index2].view(cfg.num_lms, max_len)
@@ -125,9 +170,12 @@ def demo_video(video_file, net, preprocess, input_size, net_stride, num_nb, use_
                 for i in range(cfg.num_lms):
                     x_pred = lms_pred_merge[i*2] * det_width
                     y_pred = lms_pred_merge[i*2+1] * det_height
-                    cv2.circle(frame, (int(x_pred)+det_xmin, int(y_pred)+det_ymin), 1, (0, 0, 255), 2)
+                    cv2.circle(frame, (int(x_pred)+det_xmin, int(y_pred)+det_ymin), 2, (255, 0, 0), -1)
+                outputs_prop = torch.sigmoid(outputs_prop)
+                cv2.putText(frame, "l{:.2f},r{:.2f},m{:.2f},bm{:.2f}".format(outputs_prop[3],outputs_prop[4],outputs_prop[5],outputs_prop[6]),(det_xmin, det_ymin),1,1.0,(255,0,0))
                 
             count += 1
+            out.write(frame)
             #cv2.imwrite('video_out2/'+str(count)+'.jpg', frame)
             cv2.imshow('1', frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):

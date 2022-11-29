@@ -409,7 +409,85 @@ class Pip_mbnetv3(nn.Module):
         x5 = self.nb_y_layer(x)
         return x1, x2, x3, x4, x5
     
-    
-if __name__ == '__main__':
-    pass
 
+class Pip_semnasnet(nn.Module):
+    def __init__(self, semnasnet, num_nb, num_lms=68, input_size=256, net_stride=32):
+        super(Pip_semnasnet, self).__init__()
+        self.num_nb = num_nb
+        self.num_lms = num_lms
+        self.input_size = input_size
+        self.net_stride = net_stride
+        self.features = semnasnet
+        self.sigmoid = nn.Sigmoid()
+
+        self.cls_layer = nn.Conv2d(240, num_lms, kernel_size=1, stride=1, padding=0)
+        self.x_layer = nn.Conv2d(240, num_lms, kernel_size=1, stride=1, padding=0)
+        self.y_layer = nn.Conv2d(240, num_lms, kernel_size=1, stride=1, padding=0)
+        self.nb_x_layer = nn.Conv2d(240, num_nb*num_lms, kernel_size=1, stride=1, padding=0)
+        self.nb_y_layer = nn.Conv2d(240, num_nb*num_lms, kernel_size=1, stride=1, padding=0)
+
+        self.prop_layer = nn.Sequential(nn.AdaptiveMaxPool2d(1),
+                                        nn.LeakyReLU(),
+                                        nn.Conv2d(240, 7, kernel_size=1, stride=1, padding=0)
+                                        )
+
+
+        nn.init.normal_(self.cls_layer.weight, std=0.001)
+        if self.cls_layer.bias is not None:
+            nn.init.constant_(self.cls_layer.bias, 0)
+
+        nn.init.normal_(self.x_layer.weight, std=0.001)
+        if self.x_layer.bias is not None:
+            nn.init.constant_(self.x_layer.bias, 0)
+
+        nn.init.normal_(self.y_layer.weight, std=0.001)
+        if self.y_layer.bias is not None:
+            nn.init.constant_(self.y_layer.bias, 0)
+
+        nn.init.normal_(self.nb_x_layer.weight, std=0.001)
+        if self.nb_x_layer.bias is not None:
+            nn.init.constant_(self.nb_x_layer.bias, 0)
+
+        nn.init.normal_(self.nb_y_layer.weight, std=0.001)
+        if self.nb_y_layer.bias is not None:
+            nn.init.constant_(self.nb_y_layer.bias, 0)
+    def forward(self, x):
+        x = self.features(x)[-1]
+        x1 = self.cls_layer(x)
+        x2 = self.x_layer(x)
+        x3 = self.y_layer(x)
+        x4 = self.nb_x_layer(x)
+        x5 = self.nb_y_layer(x)
+
+        x6 = self.prop_layer(x)
+        x6 = torch.squeeze(x6)
+        # print(x1.shape, x2.shape, x3.shape, x4.shape, x5.shape, x6.shape)
+
+        return x1, x2, x3, x4, x5, x6
+
+if __name__ == '__main__':
+    # from mobilenetv3 import mobilenetv3_large
+    # mbnet = mobilenetv3_large()
+    # net = Pip_mbnetv3(mbnet, 10, num_lms=68, input_size=256, net_stride=32)
+
+    import timm
+    semnasnet = timm.create_model(model_name="semnasnet_075", pretrained=True, features_only=True)
+    net = Pip_semnasnet(semnasnet, 10, num_lms=68, input_size=256, net_stride=32)
+
+    input = torch.rand(1,3,256,256)
+    x1, x2, x3, x4, x5, x6 = net(input)
+    print(x1.shape, x2.shape, x3.shape, x4.shape, x5.shape, x6.shape)
+
+    # from torchsummary import summary
+    # from torchstat import stat
+    # summary(net, input_size=(3, 256, 256), batch_size=-1)
+    # stat(net, (3, 256, 256))
+
+    # dummy_input = torch.randn(1, 3, 256, 256, device='cpu')
+    # model_name = 'pip_semnasnet'
+    # onnx_file = model_name + ".onnx"
+    # mnn_file =  model_name + ".mnn"
+    # torch.onnx.export(net, dummy_input, onnx_file,opset_version=12)
+    #
+    # import os
+    # os.system("/home/sky/buildfarm/mnn/MNN-2.1.0/build_share/MNNConvert -f ONNX --modelFile {}  --MNNModel {} --bizCode MNN".format(onnx_file, mnn_file))

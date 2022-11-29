@@ -20,6 +20,7 @@ from networks import *
 import data_utils
 from functions import * 
 from mobilenetv3 import mobilenetv3_large
+import timm
 
 if not len(sys.argv) == 2:
     print('Format:')
@@ -38,16 +39,16 @@ cfg.data_name = data_name
 os.environ['CUDA_VISIBLE_DEVICES'] = str(cfg.gpu_id)
 
 if not os.path.exists(os.path.join('./snapshots', cfg.data_name)):
-    os.mkdir(os.path.join('./snapshots', cfg.data_name))
+    os.makedirs(os.path.join('./snapshots', cfg.data_name))
 save_dir = os.path.join('./snapshots', cfg.data_name, cfg.experiment_name)
 if not os.path.exists(save_dir):
-    os.mkdir(save_dir)
+    os.makedirs(save_dir)
 
 if not os.path.exists(os.path.join('./logs', cfg.data_name)):
-    os.mkdir(os.path.join('./logs', cfg.data_name))
+    os.makedirs(os.path.join('./logs', cfg.data_name))
 log_dir = os.path.join('./logs', cfg.data_name, cfg.experiment_name)
 if not os.path.exists(log_dir):
-    os.mkdir(log_dir)
+    os.makedirs(log_dir)
 
 logging.basicConfig(filename=os.path.join(log_dir, 'train.log'), level=logging.INFO)
 
@@ -118,6 +119,9 @@ if cfg.det_head == 'pip':
         if cfg.pretrained:
             mbnet.load_state_dict(torch.load('lib/mobilenetv3-large-1cd25616.pth'))
         net = Pip_mbnetv3(mbnet, cfg.num_nb, num_lms=cfg.num_lms, input_size=cfg.input_size, net_stride=cfg.net_stride)
+    elif cfg.backbone == 'semnasnet_075':
+        semnasnet = timm.create_model(model_name="semnasnet_075", pretrained=True, features_only=True)
+        net = Pip_semnasnet(semnasnet, cfg.num_nb, num_lms=cfg.num_lms, input_size=cfg.input_size, net_stride=cfg.net_stride)
     else:
         print('No such backbone!')
         exit(0)
@@ -147,6 +151,8 @@ elif cfg.criterion_reg == 'l2':
 else:
     print('No such reg criterion:', cfg.criterion_reg)
 
+criterion_bce = nn.BCEWithLogitsLoss()
+
 points_flip = None
 if cfg.data_name == 'data_300W':
     points_flip = [17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 28, 29, 30, 31, 36, 35, 34, 33, 32, 46, 45, 44, 43, 48, 47, 40, 39, 38, 37, 42, 41, 55, 54, 53, 52, 51, 50, 49, 60, 59, 58, 57, 56, 65, 64, 63, 62, 61, 68, 67, 66]
@@ -167,6 +173,10 @@ elif cfg.data_name == 'LaPa':
     points_flip = [33, 32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 47, 46, 45, 44, 43, 51, 50, 49, 48, 38, 37, 36, 35, 34, 42, 41, 40, 39, 52, 53, 54, 55, 66, 65, 64, 63, 62, 61, 60, 59, 58, 57, 56, 80, 79, 78, 77, 76, 83, 82, 81, 84, 71, 70, 69, 68, 67, 74, 73, 72, 75, 91, 90, 89, 88, 87, 86, 85, 96, 95, 94, 93, 92, 101, 100, 99, 98, 97, 104, 103, 102, 106, 105]
     points_flip = (np.array(points_flip)-1).tolist()
     assert len(points_flip) == 106
+elif cfg.data_name == 'data_video':
+    points_flip = [17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 28, 29, 30, 31, 36, 35, 34, 33, 32, 46, 45, 44, 43, 48, 47, 40, 39, 38, 37, 42, 41, 55, 54, 53, 52, 51, 50, 49, 60, 59, 58, 57, 56, 65, 64, 63, 62, 61, 68, 67, 66]
+    points_flip = (np.array(points_flip)-1).tolist()
+    assert len(points_flip) == 68
 else:
     print('No such data!')
     exit(0)
@@ -196,5 +206,5 @@ else:
 
 train_loader = torch.utils.data.DataLoader(train_data, batch_size=cfg.batch_size, shuffle=True, num_workers=8, pin_memory=True, drop_last=True)
 
-train_model(cfg.det_head, net, train_loader, criterion_cls, criterion_reg, cfg.cls_loss_weight, cfg.reg_loss_weight, cfg.num_nb, optimizer, cfg.num_epochs, scheduler, save_dir, cfg.save_interval, device)
+train_model(cfg.det_head, net, train_loader, criterion_cls, criterion_reg, criterion_bce, cfg.cls_loss_weight, cfg.reg_loss_weight, cfg.num_nb, optimizer, cfg.num_epochs, scheduler, save_dir, cfg.save_interval, device)
 

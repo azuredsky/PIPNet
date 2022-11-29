@@ -125,13 +125,16 @@ class ImageFolder_pip(data.Dataset):
 
     def __getitem__(self, index):
 
-        img_name, target = self.imgs[index]
+        img_name, target_all = self.imgs[index]
+
+        target = target_all[:-7]
+        target_prop = target_all[-7:]
 
         img = Image.open(os.path.join(self.root, img_name)).convert('RGB')
         img, target = random_translate(img, target)
         img = random_occlusion(img)
-        img, target = random_flip(img, target, self.points_flip)
-        img, target = random_rotate(img, target, 30)
+        # img, target = random_flip(img, target, self.points_flip)
+        # img, target = random_rotate(img, target, 30)
         img = random_blur(img)
 
         target_map = np.zeros((self.num_lms, int(self.input_size/self.net_stride), int(self.input_size/self.net_stride)))
@@ -147,6 +150,8 @@ class ImageFolder_pip(data.Dataset):
         target_nb_x = torch.from_numpy(target_nb_x).float()
         target_nb_y = torch.from_numpy(target_nb_y).float()
 
+        target_prop = torch.from_numpy(target_prop).float()
+
         if self.transform is not None:
             img = self.transform(img)
         if self.target_transform is not None:
@@ -156,11 +161,34 @@ class ImageFolder_pip(data.Dataset):
             target_nb_x = self.target_transform(target_nb_x)
             target_nb_y = self.target_transform(target_nb_y)
 
-        return img, target_map, target_local_x, target_local_y, target_nb_x, target_nb_y
+        return img, target_map, target_local_x, target_local_y, target_nb_x, target_nb_y, target_prop
 
     def __len__(self):
         return len(self.imgs)
 
 if __name__ == '__main__':
     pass
-    
+    # points_flip = [17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 28, 29, 30, 31, 36, 35, 34, 33, 32, 46, 45, 44, 43, 48, 47, 40, 39, 38, 37, 42, 41, 55, 54, 53, 52, 51, 50, 49, 60, 59, 58, 57, 56, 65, 64, 63, 62, 61, 68, 67, 66]
+    # points_flip = (np.array(points_flip)-1).tolist()
+    # from functions import *
+    # labels = get_label('data_video', 'test_prob.txt')
+    # # print(labels)
+    # meanface_indices, _, _, _ = get_meanface(os.path.join('data', 'data_video', 'meanface.txt'), 68)
+    # import torchvision.transforms as transforms
+    #
+    # normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+    #                                  std=[0.229, 0.224, 0.225])
+    #
+    # data = ImageFolder_pip(os.path.join('data', 'data_video', 'images_test'),
+    #                 labels, 256, 68,
+    #                 32, points_flip, meanface_indices,
+    #                 transforms.Compose([
+    #                     transforms.RandomGrayscale(0.2),
+    #                     transforms.ToTensor(),
+    #                     normalize]))
+    #
+    # loader = torch.utils.data.DataLoader(data, batch_size=1, shuffle=True, num_workers=8, pin_memory=True, drop_last=True)
+    #
+    # for i, data in enumerate(loader):
+    #     inputs, labels_map, labels_x, labels_y, labels_nb_x, labels_nb_y, labels_prop = data
+    #     print(inputs.shape, labels_map.shape, labels_x.shape, labels_y.shape, labels_nb_x.shape, labels_nb_y.shape, labels_prop.shape)

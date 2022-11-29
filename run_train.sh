@@ -31,3 +31,4 @@
 #nohup python lib/train_gssl.py experiments/data_300W_CELEBA/pip_32_16_60_r18_l2_l1_10_1_nb10_wcc.py &
 
 
+python lib/train.py experiments/data_video/pip_32_16_60_se075_l2_l1_10_1_nb10.py
